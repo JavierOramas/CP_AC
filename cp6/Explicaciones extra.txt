@@ -1,0 +1,1 @@
+el 4.iii no se puede hacer, dado que no se conoce la cantidad de As y Bs que va a tener la cadena, por tanto no hay una cantidad finita de estados 
