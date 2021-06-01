@@ -1,0 +1,240 @@
+\documentclass{article}
+\usepackage[hidelinks]{hyperref}
+
+\author{Javier A. Oramas L\'opez}
+\title{Procesador S-MIPS}
+\begin{document}
+    
+    \maketitle
+
+    \section{Introducci\'on}
+        Este art\'iculo acompa\~na al archivo s-mips.circ y debe leerse a modo de argumentaci\'on del trabajo realizado en el dise\~no e implementaci\'on del mismo
+
+        El microprocesador S-MIPS est\'a formado por los siguientes compoentes \hyperref[sec:PC]{\textbf{Program Counter(PC)}},
+        \hyperref[sec:BCU]{\textbf{Branch Control Unit (BCU)}}, \hyperref[sec:IF]{\textbf{Instruction Fetcher (IF)}}, 
+        \hyperref[sec:ID]{\textbf{Instrction Decoder (ID)}},\hyperref[sec:CU]{\textbf{Control Unit (CU)}}, \hyperref[sec:RF]{\textbf{Register File(RF)}},
+        \hyperref[sec:ALU]{\textbf{Arithmetic Logic Unit (ALU)}}, \hyperref[sec:Cache]{\textbf{Cache}}
+    
+    \section{Flujo del Procesador}
+        este flujo intenta explicar de la mejor manera posible el funcionamiento del micro, no obstante est\'a explicado de manera secuancial, cuando muchas de estas operaci\'ones pueden estar ocurriendo en paralelo
+        o pueden no cumplir explicitamente el orden de escritura, todo est\'a en dependencia del programa que se est\'e ejecutando
+        \begin{enumerate}
+            \item Al inicio de la ejecuci\'on de un programa, la CU env\'ia la se\~nal nextInstr al PC y BCU
+            \item Como no hay ninguna instrucci\'on anterior, el PC env\'ia la direci\'on inicial al BCU, a la Cache de instrucci\'ones y al IF
+            \item El Cache de instrucci\'ones recibe la direcci\'on de la instrucci'on que deber\'a enviar a IF, carga el dato y lo env\'ia a IF 
+            \item El IF recibe la direcci\'on donde se encuentra la instrucci\'on a ejecutar, adem\'as recibe 4 outputs de la cache, de donde obtendr\'a la instrucci\'on a decodificar
+            \item El ID recibe la instrucci\'on del IF, la procesa y, en dependencia del tipo de instrucci\'on puede tener distintos comportamientos:
+            \begin{enumerate}
+                \item Instrucci\'on R:\\
+                por las salidas Rs, Rd y Rt, env\'ia las direcci\'ones en el RF de los registros que ser\'an utilizados por la instrucci\'on a ejecutar
+                \item Instrucci\'on I\\
+                por las salidas Rs y Rt env\'ia los registros a ser utilizados, adem\'as por la salida Offset env\'ia el offset
+                \item Instrucci\'on J\\
+                por la salida Dir env\'ia la direcci\'ion de memoria a donde debe saltar la instrucci\'on
+                
+            \end{enumerate}
+                adem\'as de estas salidas, el ID tiene una serie de flags que representar\'an cada una de las posibles operaci\'ones a realizar,
+                solo una de ellas puede estar encendida a la vez 
+            \item La CU recibe todas las flags del ID y en dependencia de la operaci\'on a realizar env\'ia el codigo de operaci\'on (solo para instrucci\'ones de la ALU),
+            flags para garantizar el correcto funcionamiento de los componentes (como puede ser control de lectura o escritura en el RF, la operaci\'on a realizar por el BCU, los jumps
+            , activaci\'on del KBD o TTY entre otros)
+
+            \item EL RF recibe los selectores de registro enviados por el ID, si se va a escribir en el, recibe el dato a escribir de la fuente que sea pertinente (Resultado de la ALU, entrada de KBD, datos en memoria enviados por la cache de datos, etc...), adem\'as de las flags correspondientes de la CU, en dependencia de estos realizar\'a una de las siguientes operaciones:
+            \begin{enumerate}
+                \item obtiene los valores solicitados por los selectores recibidos y los devuelve
+                \item escribe el dato recibido en la direcci\'on indicada 
+                \item mueve el SP en dependencia de la operaci\'on (pop/push)
+            \end{enumerate}
+
+            \item la ALU recibe los datos enviados por el RF como operandos, alternativamente puede operarse con el offset o con un valor constante 0 sustituyendo a uno de estos elementos,
+            recibe tambien, proveniente de la CU una se\~nal que indica si se desea realizar la operaci\'on con signo o sin signo, y el c\'odigo de operaci\'on, para seleccionar el resultado que se desea obtener
+            la ALU emite como salida el resultado de la operaci\'on seleccionada, as\'i como dos salidas extra llamadas Hi y Lo, para datos extras provenientes de operaciones con multiplicaci\'on y divisi\'on
+            
+            adem\'as cuenta con los flags slt, igualdad ente los operandos, menor que cero e igual a 0, que brindan informaci\'on extra de la operaci\'on, el primero es extendido a 32 bits y puede ser almacenado en el RF, los tres \'ultimos son enviados a la BCU
+            
+            \item La BCU puede realizar dos tipos de operaci\'ones, el movimiento a la siguiente instrucci\'on o saltar a una instrucci\'on espec'ifica, recibe adem\'as los flags de las condicionales para seleccionar la siguiente instrucci\'on
+            el resultado de estas operaciones es enviado al PC para iniciar el pr\'oximo ciclo de operaciones
+
+            \item Una vez terminada la ejecuci\'on de una instrucci\'on, la CU da nuevamente la se\~nal de obtener una instrucci\'on nueva, hasta que la instrucci\'on a ejecutar se halt, la cual termina el proceso de ejecuci\'on activando el flag de STOP en la CU
+            
+
+        \end{enumerate}
+            
+    \section{Componentes}
+        
+        Muchos de estos componentes reciben adem\'as entradas de reloj y/o reset, se omiten en la explicaci\'on, dado que es evidente e irrelevante la explicaci\'on de las mismas
+    
+        \subsection{Program Counter(PC)}
+        \label{sec:PC}
+        El Program Counter est\'a formado por un registro de 32 bits encargado de almacenar la direcci\'on en memoria de la instrucci\'on actual
+
+        \subsubsection{Entradas}
+        \begin{enumerate}
+            \item En: se\~nal que activa el registro para almacenar un nuevo dato
+            \item PC-In: Nueva direcci\'on a almacenar 
+        \end{enumerate}
+        \subsubsection{Salidas}
+        \begin{enumerate}
+            \item PC-Out: Direcci\'on en memoria de la instrucci\'on actual
+        \end{enumerate}
+
+        \subsection{Branch Control Unit (BCU)}
+        \label{sec:BCU}
+        La Branch Control Unit es la encargada de mover el valor de PC, en dependencia de la operaci\'on esto puede ser:
+        \begin{enumerate}
+            \item Instrucci\'on Siguiente (PC+4)
+            \item Saltar a una posici\'on espec\'ifica (PC = Dest)
+            \item Mover seg\'un el offset si se cumple una condici\'on (PC + Offset), la condici\'on que se debe cumplir est\'a dada por las flags beq, bne, blez, bgtz, bltz, y se calcula su cumplimiento o no a partir de las entradas ZF, <0 e = recibidas de la ALU
+        \end{enumerate}
+            \subsubsection{Entradas}
+            \begin{enumerate}
+                \item beq: a\~nade el Offset a PC si Rs = Rt
+                \item bne: a\~nade el Offset a PC si Rs $\not =$ Rt
+                \item blez: a\~nade el Offset a PC si Rs $\leq$ 0
+                \item bgez: a\~nade el Offset a PC si Rs $\geq$ 0
+                \item bltz: a\~nade el Offset a PC si Rs < 0
+                \item j: PC = Dest
+                \item jr: Pc = Rs
+                \item next: Selecciona si se ha de actualizar el valor de salida o no
+                \item ZF: Rs == 0
+                \item =: Rs == Rt
+                \item <0: Rs < 0 
+                \item PC-In: direcci\'on de la instrucci\'on actual
+            \end{enumerate}
+            
+            \subsubsection{Salidas}
+            \begin{enumerate}
+                \item PC-Out: Direcci\'on de la nueva instrucci\'on
+            \end{enumerate}    
+
+        \subsection{Instruction Fetcher (IF)} 
+        \label{sec:IF}
+            EL Instruction Fetcher recibe la direcci\'on en memoria de la pr\'oxima instrucci\'on a ser ejecutada, dicha direcci\'on previamente ha sido precargada 
+            por la cache de instrucciones y es enviada a trav\'es de una de las 4 entradas de memoria, el IF selecciona el banco correspondiente y env\'ia la instrucci\'on almacenada en este al registro donde almacena la instrucci\'on actual, esta misma es devuelta al usuario
+            \subsubsection{Entradas}
+            \begin{enumerate}
+                \item Ready: Se\~nal que indica que ya el Cache de instrucciones tiene cargada la direcci\'on que se desea acceder
+                \item Bank0-3: 4 entradas correspondientes a las salidas de los 4 bancos de memoria (proveniente del Cache de instrucciones)
+            \end{enumerate}
+
+            \subsubsection{Salidas}
+            \begin{enumerate}
+                \item Inst: Instrucci\'on a ser decodificada y posteriormente ejecutada
+                \item Done: flag que se\~nala q termin\'o el proceso de obtener la instrucci\'on
+            \end{enumerate}
+
+        \subsection{Instrction Decoder (ID)}
+        \label{sec:ID}
+            El Instruction Decoder recibe la instrucci\'on y extrae los bits 26-31 para determinar el tipo de instrucci\'on:
+            \begin{enumerate}
+                \item Instrucci\'on R: de los bits 0-5 obtinene la operaci\'on y activa el flag correspondiente divide el resto de la instrucci\'on para obtener las direcciones de los registros Rt, Rd y Rs
+                \item Instrucci\'on I: los bits 26-31 definen la operaci\'on y activa el flag correspondiente, del resto de la instrucci\'on obtiene las direcciones de Rt y Rs, as\'i como el valor de Offset
+                \item Instrucci\'on J: los bits 26-31 definen la operaci\'on y activa el flag correspondiente, el resto de la instrucci\'on ser\'a tomado como la direcci\'on de la operaci\'on jump
+            \end{enumerate}
+            \subsubsection{Entradas}
+            \begin{enumerate}
+                \item Instruction: Instrucci\'on a decodificar
+            \end{enumerate}
+            \subsubsection{Salidas}
+            \begin{enumerate}
+                \item 36 flags: correspondientes a cada operaci\'on realizable por el micro
+                \item Rs,Rt,Rd: salidas de las direcci\'ones en el RF de los registros a utilizar
+                \item Offset: salida del valor de Offset de las instrucciones tipo I
+                \item Dir: Salida de la direcci\'on para las instrucci\'ones de tipo J
+            \end{enumerate}
+
+        \subsection{Control Unit}
+        \label{sec:CU}
+            La Control Unit recibe la operaci\'on a realizar, si esta es una operacion aritm\'etico/l\'ogica envi\'a el codigo de esa operacion a la ALU, adem\'as actia otras flags en dependencia de la operaci\'on que se vaya a realizar
+
+            \subsubsection{Entradas}
+            \begin{enumerate}
+                \item 36 flags provenientes del ID: de todos los flags provenientes del ID obtiene la informaci\'on de l aoperaci\'on que se va a realizar
+            \end{enumerate}
+            \subsubsection{Salidas}
+            \begin{enumerate}
+                \item Next: solicitar pr\'oxima instrucci\'on
+                \item OpCode: c\'odigo de operaci\'on de la ALU
+                \item Sign: Define si la operaci\'on en la ALU se ha de realizar con signo o sin \'el
+                \item beq, bne, blez, bgtz bltz: se\~nales de operaci\'on en el BCU
+                \item j, jr: saltos en el BCU
+                \item enRND: Activa el random generator
+                \item instEn: Se\~nal de activaci\'on para la Cache de instrucciones
+                \item STOP: se\~nal de halt, temina la ejecuci\'on
+                \item enRead,enWrite: se\~nal de lectura y escritura para la cache de datos
+                \item pushRf, popRF: operaciones de pila en el RF
+                \item enSP: activa o desactiva el registro SP del RF (para modificar su contenido)
+                \item R/W: intercambia entre lectura y escritura en el RF
+                \item TTYEn: activa el TTY (para imprimir los datos)
+                \item KBDEn: activa el KBD (para recibir datos del teclado)
+            \end{enumerate}
+
+        \subsection{Register File(RF)}
+        \label{sec:RF}       
+            EL Register File consta de 32 registros de 32 bits, enumerados de $R_{0}$ a $R_{31}$
+            donde $R_0$ siempre va a contener el valor 0 y $R_{31}$, tambi\'en llamado SP actuara\'a como contenedor del puntero de pila (Stack Pointer)
+            El Register File puede realizar 2 operaciones:
+            
+            \begin{enumerate}
+                \item Read: Recibe dos direccioes de 5 bits, las cuales se har\'an corrseponder con un registro de los que conforma el RF, los valores de ambor registros se enviar\'an por las salidas del RF
+                \item Write: Recibe una direcci\'on de 5 bits y un valor de 32 bits a almacenar el en registro correspondiente a la direcci\'on recibida
+            \end{enumerate}
+            
+            \subsubsection{Entradas}
+            \begin{enumerate}
+                \item dirA, dirB: entradas de 5 bits para indicar los registros que se desean
+                \item dirData: direcci\'on del registro donde se desea guardar la informaci'on recibida
+                \item Data: informaci\'on que se desea guardar en el RF
+                \item pop, push: operaci\'ones para manipular el SP
+                \item EnSP: permite guardar o no las modificaciones en el SP
+            \end{enumerate}
+            \subsubsection{Salidas}
+
+        \subsection{Arithmetic Logic Unit(ALU)}
+        \label{sec:ALU}        
+            La Arithmetic Logic Unit es la encargada de realizar las operaciones aritm\'etico l\'ogicas, recibe la operaci\'on a realizar de la CU, junto con los operandos ya sea del RF, Offset o el valor constante 0
+             si se activa la flag Sign, se ha de remover el bit de signo de los operandos, de lo contrario directamente estos se pueden usar, se selecciona la operaci\'on deseada y se manda a la salida el resultado, alternativamente pudiera enviarse tambien 
+             informaci\'on por las salidas Hi y Lo si se tratara de una multiplicaci\'on o divisi\'on
+            \subsubsection{Entradas}
+            \begin{enumerate}
+                \item A,B: Operandos
+                \item Sign: indicador de si se debe tomar operaciones con signo o sin signo
+                \item OpCode: selector para determinar que operaci\'on se ha de realizar
+            \end{enumerate}
+            \subsubsection{Salidas}
+                \begin{enumerate}
+                    \item Res: resutado de la operaci\'on
+                    \item Hi,Lo: puede devolver, dependiendo de si la operaci\'on realizada es multiplicaci\'on o division el resultado de la multiplicacion por ambas salidas o el resultado de la division por Hi y el resto de la divisi\'on por Lo
+                    \item flags ZF, <0, = , Sign: flags que describen las propiedades correspondientes de Res
+                \end{enumerate}
+
+        \subsection{Cache}
+        \label{sec:Cache}
+            El cache implementado fue dise\~nado con una funci\'on de mapeo Direct Mapped, politica de reemplazo Random, y politica de escritura write trough y fue dividido en dos componentes:
+            \subsubsection{Cache Instr}
+                La Cache de instrucciones recibe la direcci\'on de memoria que se desea acceder, se divide en offset tag, e idx
+                se verifica si la cache contiene el dato que se desea obtener, de ser as\'i, directamente se devuelve el dato, de lo contrario
+                se env\'ia a la RAM la solicitud de la direcci\'on deseada, se activa un contador hasta el Read time recibido por la Cache y una vez termine
+                se guarda el valor en el banco de la cache correspondiente y se envi\'ia el dato como parte de la salida, adem\'as se activa el flag de terminado
+            
+            \subsubsection{Cache Data}
+                La cache de Datos Funciona de manera parecida a la cache de instrucciones, recibe el address a buscar, si est\'a escribiendo env\'ia los datos a la ram para que se escriban y una vez termine 
+                este proceso, almacena los datos en el bloque que le corresponde, si existe un bloque disponible lo almacena all\'i, de lo contrario, selecciona una direcci\'on random y alli lo almacena, para la 
+                lectura el procedimiento es an\'alogo, al procedimiento de la cache de instrucciones, solo que tomando el bloque a modificar en la cache de manera random     
+
+                \subsubsection{Entradas}
+                \begin{enumerate}
+                    \item Banks0-3: bancos de ram 
+                    \item Addr: direcci\'on a leer o escribir
+                    \item Data (solo en Cache de datos): Valor a guardar en la Cache
+                    \item RT, WT: tiempos de lectura y escritura de la Ram
+                \end{enumerate}
+                \subsubsection{Salidas}
+                \begin{enumerate}
+                    \item CacheBank0-3: 4 bancos del cache
+                    \item memAddr: direcci\'on que se desea obtener de la ram
+                    \item DoneRead/Write: flags que se\~nalan el fin de la lectura o escritura respectivamente
+                    \item CS: Chip Select
+                \end{enumerate}
+        
+\end{document}
